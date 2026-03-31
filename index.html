@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tikor PLN PRO</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+body { margin:0; font-family: Arial; }
+
+h1 {
+    background:#0d6efd;
+    color:white;
+    padding:12px;
+    text-align:center;
+    margin:0;
+    font-size:18px;
+}
+
+.container { display:flex; height:92vh; }
+
+.form-box {
+    width:30%;
+    padding:12px;
+    background:#f8f9fa;
+    overflow:auto;
+}
+
+input {
+    width:95%;
+    padding:8px;
+    margin:4px 0;
+    border-radius:6px;
+    border:1px solid #ccc;
+}
+
+button {
+    width:100%;
+    padding:9px;
+    margin-top:6px;
+    border:none;
+    border-radius:6px;
+    background:#0d6efd;
+    color:white;
+    cursor:pointer;
+}
+
+#map { width:70%; height:100%; }
+
+.label-nama {
+    background:white;
+    border:1px solid black;
+    border-radius:6px;
+    padding:2px 6px;
+    font-size:11px;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<h1>⚡ Tikor PLN PRO (Realtime)</h1>
+
+<div class="container">
+
+<div class="form-box">
+
+<input id="search" placeholder="🔍 Cari pelanggan..." onkeyup="renderRealtime()">
+
+<input id="nama" placeholder="Nama Pelanggan">
+<input id="idpel" placeholder="ID Pelanggan">
+<input id="alamat" placeholder="Alamat">
+
+<button onclick="ambilLokasi()">📡 Ambil GPS</button>
+<p id="koordinat">Koordinat: -</p>
+
+<button onclick="simpanData()">💾 Simpan</button>
+
+</div>
+
+<div id="map"></div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<!-- FIREBASE -->
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+
+// CONFIG
+const firebaseConfig = {
+  apiKey: "AIzaSyBukCnDCuMsGhT7WOJ_2gyIWE1IS1HRV-M",
+  authDomain: "tikor-pln-f5bf0.firebaseapp.com",
+  projectId: "tikor-pln-f5bf0",
+  storageBucket: "tikor-pln-f5bf0.appspot.com",
+  messagingSenderId: "405427589154",
+  appId: "1:405427589154:web:18eebf79d56c9a484d3a7b"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// GLOBAL
+window.currentLat=null;
+window.currentLng=null;
+window.currentAcc=null;
+window.markersLayer=null;
+
+// MAP
+const map = L.map('map',{maxZoom:22}).setView([-6.4,107.4],18);
+
+L.tileLayer(
+'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+{maxZoom:22}
+).addTo(map);
+
+markersLayer = L.layerGroup().addTo(map);
+
+// GPS
+window.ambilLokasi = function(){
+
+navigator.geolocation.getCurrentPosition(pos=>{
+
+currentLat=pos.coords.latitude;
+currentLng=pos.coords.longitude;
+currentAcc=pos.coords.accuracy;
+
+document.getElementById("koordinat").innerText =
+`📍 ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)} ±${Math.round(currentAcc)}m`;
+
+map.setView([currentLat,currentLng],21);
+
+L.marker([currentLat,currentLng]).addTo(map)
+.bindPopup("Lokasi Anda").openPopup();
+
+});
+}
+
+// SIMPAN KE FIREBASE
+window.simpanData = async function(){
+
+let nama=document.getElementById("nama").value;
+let idpel=document.getElementById("idpel").value;
+let alamat=document.getElementById("alamat").value;
+
+if(!nama||!idpel||!alamat||!currentLat){
+alert("Lengkapi data!");
+return;
+}
+
+await addDoc(collection(db,"tikor"),{
+nama,idpel,alamat,
+lat:currentLat,
+lng:currentLng,
+akurasi:currentAcc,
+status:"BONGKAR",
+waktu:new Date().toLocaleString()
+});
+
+alert("Tersimpan ke Firebase ✅");
+}
+
+// REALTIME
+window.renderRealtime = function(){
+
+onSnapshot(collection(db,"tikor"),snapshot=>{
+
+markersLayer.clearLayers();
+
+let keyword=document.getElementById("search").value.toLowerCase();
+
+snapshot.forEach(docSnap=>{
+
+let d = docSnap.data();
+let id = docSnap.id;
+
+if(!d.nama.toLowerCase().includes(keyword) && !d.idpel.includes(keyword)) return;
+
+let warna = d.status==="SELESAI"?"green":"blue";
+
+let marker=L.circleMarker([d.lat,d.lng],{
+color:warna,
+radius:8
+}).addTo(markersLayer);
+
+marker.bindTooltip(d.nama,{
+permanent:true,
+direction:"top",
+className:"label-nama"
+});
+
+marker.bindPopup(`
+<b>${d.nama}</b><br>
+ID: ${d.idpel}<br>
+${d.alamat}<br>
+Akurasi: ±${Math.round(d.akurasi)} m<br>
+🕒 ${d.waktu}<br>
+
+<a href="https://www.google.com/maps?q=${d.lat},${d.lng}" target="_blank">🧭 Navigasi</a><br>
+<a href="https://www.google.com/maps?q=&layer=c&cbll=${d.lat},${d.lng}" target="_blank">👁️ Street View</a><br><br>
+
+<button onclick="selesaikan('${id}')">✅ Selesai</button>
+<button onclick="hapus('${id}')">🗑️ Hapus</button>
+`);
+
+});
+
+});
+}
+
+// UPDATE
+window.selesaikan = async function(id){
+await updateDoc(doc(db,"tikor",id),{
+status:"SELESAI"
+});
+}
+
+// DELETE
+window.hapus = async function(id){
+if(confirm("Hapus data?")){
+await deleteDoc(doc(db,"tikor",id));
+}
+}
+
+// INIT
+renderRealtime();
+
+</script>
+
+</body>
+</html>
