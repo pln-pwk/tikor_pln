@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tikor PLN PRO</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+body { margin:0; font-family: Arial; }
+
+h1 {
+    background:#0d6efd;
+    color:white;
+    padding:12px;
+    text-align:center;
+    margin:0;
+    font-size:18px;
+}
+
+.container { display:flex; height:92vh; }
+
+.form-box {
+    width:30%;
+    padding:12px;
+    background:#f8f9fa;
+    overflow:auto;
+}
+
+input {
+    width:95%;
+    padding:8px;
+    margin:4px 0;
+    border-radius:6px;
+    border:1px solid #ccc;
+}
+
+button {
+    width:100%;
+    padding:9px;
+    margin-top:6px;
+    border:none;
+    border-radius:6px;
+    background:#0d6efd;
+    color:white;
+    cursor:pointer;
+}
+
+#map { width:70%; height:100%; }
+
+.label-nama {
+    background:white;
+    border:1px solid black;
+    border-radius:6px;
+    padding:2px 6px;
+    font-size:11px;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<h1>⚡ Tikor PLN </h1>
+
+<div class="container">
+
+<div class="form-box">
+
+<input id="search" placeholder="🔍 Cari pelanggan...">
+
+<input id="nama" placeholder="Nama Pelanggan">
+<input id="idpel" placeholder="ID Pelanggan">
+<input id="alamat" placeholder="Alamat">
+<input type="file" id="foto" accept="image/*">
+<button onclick="bukaKamera()">📷 Buka Kamera</button>
+
+<video id="video" width="100%" autoplay style="display:none;"></video>
+<button onclick="ambilFoto()" style="display:none;" id="btnAmbil">📸 Ambil Foto</button>
+
+<canvas id="canvas" style="display:none;"></canvas>
+<img id="preview" width="100%" style="margin-top:5px;"/>
+
+<button onclick="ambilLokasi()">📡 Ambil GPS</button>
+<button onclick="lokasiSaya()">📍 Lokasi Saya (Pasang)</button>
+<p id="koordinat">Koordinat: -</p>
+
+<button onclick="simpanData()">💾 Simpan</button>
+
+</div>
+
+<div id="map"></div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script type="module">
+
+const PIN = "11026"; // PIN harus di dalam sini
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+
+// FIREBASE CONFIG
+const firebaseConfig = {
+  apiKey: "AIzaSyBukCnDCuMsGhT7WOJ_2gyIWE1IS1HRV-M",
+  authDomain: "tikor-pln-f5bf0.firebaseapp.com",
+  projectId: "tikor-pln-f5bf0",
+  storageBucket: "tikor-pln-f5bf0.appspot.com",
+  messagingSenderId: "405427589154",
+  appId: "1:405427589154:web:18eebf79d56c9a484d3a7b"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// URL GOOGLE SHEET
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbwaCiUaJPHPh9blJAx1DG81w8nV2db6YUI580FnC8DMe-qwq6ZgB_z4C3gZqPGUaZLTbQ/exec";
+
+// GLOBAL
+let currentLat=null;
+let currentLng=null;
+let currentAcc=null;
+let markersLayer=null;
+let allData = [];
+
+// MAP
+const map = L.map('map',{maxZoom:22}).setView([-6.4,107.4],18);
+
+L.tileLayer(
+'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+{maxZoom:22}
+).addTo(map);
+
+markersLayer = L.layerGroup().addTo(map);
+
+// GPS
+window.ambilLokasi = function(){
+navigator.geolocation.getCurrentPosition(pos=>{
+currentLat=pos.coords.latitude;
+currentLng=pos.coords.longitude;
+currentAcc=pos.coords.accuracy;
+
+document.getElementById("koordinat").innerText =
+`📍 ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)} ±${Math.round(currentAcc)}m`;
+
+map.setView([currentLat,currentLng],21);
+
+L.marker([currentLat,currentLng]).addTo(map)
+.bindPopup("Lokasi Anda").openPopup();
+});
+}
+
+// MODE PASANG
+window.lokasiSaya = function(){
+navigator.geolocation.getCurrentPosition(pos=>{
+
+let lat = pos.coords.latitude;
+let lng = pos.coords.longitude;
+
+map.setView([lat,lng],21);
+
+L.marker([lat,lng],{
+icon: L.icon({
+iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+iconSize: [35,35]
+})
+}).addTo(map)
+.bindPopup("📍 Lokasi Anda (Pasang)").openPopup();
+
+let ditemukan = false;
+
+allData.forEach(d=>{
+let jarak = Math.sqrt(
+Math.pow(lat - d.lat,2) + Math.pow(lng - d.lng,2)
+);
+
+if(jarak < 0.0001){
+ditemukan = true;
+}
+});
+
+if(ditemukan){
+alert("⚠️ ADA TITIK BONGKAR DI SINI!");
+}else{
+alert("✅ Aman, tidak ada titik");
+}
+
+});
+}
+
+// SIMPAN DATA
+let stream = null;
+let fotoDariKamera = null;
+
+// BUKA KAMERA
+window.bukaKamera = async function(){
+  const video = document.getElementById("video");
+  const btn = document.getElementById("btnAmbil");
+
+  stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  video.srcObject = stream;
+
+  video.style.display = "block";
+  btn.style.display = "block";
+}
+
+// AMBIL FOTO
+window.ambilFoto = function(){
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const preview = document.getElementById("preview");
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0);
+
+  fotoDariKamera = canvas.toDataURL("image/jpeg");
+
+  preview.src = fotoDariKamera;
+
+  // matikan kamera
+  stream.getTracks().forEach(track => track.stop());
+
+  video.style.display = "none";
+  document.getElementById("btnAmbil").style.display = "none";
+}
+window.simpanData = async function(){
+
+let nama=document.getElementById("nama").value;
+let idpel=document.getElementById("idpel").value;
+let alamat=document.getElementById("alamat").value;
+let file = document.getElementById("foto").files[0];
+let fotoBase64 = null;
+
+if(!nama||!idpel||!alamat||!currentLat){
+alert("Lengkapi data!");
+return;
+}
+
+// CEK FOTO (FILE ATAU KAMERA)
+if(!file && !fotoDariKamera){
+  alert("Foto wajib diisi!");
+  return;
+}
+
+// PRIORITAS: KAMERA DULU
+if(fotoDariKamera){
+  fotoBase64 = fotoDariKamera;
+}else{
+  fotoBase64 = await new Promise((resolve)=>{
+    let reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+
+// 🔹 DATA FIREBASE (TANPA FOTO)
+let dataFirebase = {
+nama,
+idpel,
+alamat,
+lat:currentLat,
+lng:currentLng,
+status:"BONGKAR",
+waktu:new Date().toLocaleString()
+};
+
+// 🔹 DATA SHEET (PAKAI FOTO)
+let dataSheet = {
+nama,
+idpel,
+alamat,
+lat:currentLat,
+lng:currentLng,
+status:"BONGKAR",
+waktu:new Date().toLocaleString(),
+foto: fotoBase64
+};
+
+// SIMPAN FIREBASE
+await addDoc(collection(db,"tikor"),dataFirebase);
+
+// KIRIM KE SHEET
+fetch(SHEET_URL,{
+method:"POST",
+mode:"no-cors",
+body: JSON.stringify(dataSheet)
+});
+
+alert("Data + Foto berhasil dikirim ✅");
+
+}
+
+// REALTIME
+onSnapshot(collection(db,"tikor"),snapshot=>{
+
+markersLayer.clearLayers();
+allData = [];
+
+let keyword=document.getElementById("search").value.toLowerCase();
+
+snapshot.forEach(docSnap=>{
+
+let d = docSnap.data();
+let id = docSnap.id;
+
+allData.push(d);
+
+if(!d.nama.toLowerCase().includes(keyword) && !d.idpel.includes(keyword)) return;
+
+let marker;
+let status = (d.status || "").toString().trim().toUpperCase();
+
+if(status === "BONGKAR"){
+
+  marker = L.marker([d.lat,d.lng],{
+    icon: L.divIcon({
+      html: "<span style='color:red;font-size:28px;font-weight:bold;'>❗</span>",
+      className: "",
+      iconSize: [20,20]
+    })
+  }).addTo(markersLayer);
+
+}else if(status === "SELESAI"){
+
+  marker = L.circleMarker([d.lat,d.lng],{
+    color:"green",
+    radius:8
+  }).addTo(markersLayer);
+
+}else{
+
+  marker = L.circleMarker([d.lat,d.lng],{
+    color:"blue",
+    radius:8
+  }).addTo(markersLayer);
+
+}
+
+marker.bindTooltip(d.nama,{
+permanent:true,
+direction:"top",
+className:"label-nama"
+});
+
+marker.bindPopup(`
+<b>${d.nama}</b><br>
+ID: ${d.idpel}<br>
+${d.alamat}<br>
+🕒 ${d.waktu}<br>
+
+<a href="https://www.google.com/maps?q=${d.lat},${d.lng}" target="_blank">🧭 Navigasi</a><br><br>
+
+<button onclick="selesaikan('${id}')">✅ Selesai</button>
+<button onclick="hapus('${id}')">🗑️ Hapus</button>
+`);
+
+});
+
+});
+window.hapus = async function(id){
+
+let inputPin = prompt("Masukkan PIN untuk hapus:");
+
+if(!inputPin){
+  alert("⚠️ PIN dibatalkan");
+  return;
+}
+
+if(inputPin !== PIN){
+  alert("❌ PIN salah!");
+  return;
+}
+
+if(confirm("Yakin hapus data?")){
+
+  alert("⏳ Menghapus...");
+
+  try{
+    await deleteDoc(doc(db,"tikor",id));
+    alert("🗑️ Data berhasil dihapus");
+  }catch(err){
+    alert("❌ Gagal hapus: " + err.message);
+  }
+
+}
+
+}
+// DELETE
+window.hapus = async function(id){
+
+let inputPin = prompt("Masukkan PIN untuk hapus:");
+
+if(!inputPin){
+  alert("⚠️ PIN dibatalkan");
+  return;
+}
+
+if(inputPin !== PIN){
+  alert("❌ PIN salah!");
+  return;
+}
+
+if(confirm("Yakin hapus data?")){
+  try{
+    await deleteDoc(doc(db,"tikor",id));
+    alert("🗑️ Data berhasil dihapus");
+  }catch(err){
+    alert("❌ Gagal hapus: " + err.message);
+  }
+}
+
+}
+
+
+</script>
+
+</body>
+</html>
