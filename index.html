@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tikor PLN PRO</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+/* RESET DASAR */
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden; /* 🔥 penting biar tidak bentrok scroll */
+  font-family: 'Segoe UI', sans-serif;
+  background: linear-gradient(135deg,#eef2f7,#dfe9f3);
+}
+
+/* HEADER */
+.header{
+  background:linear-gradient(135deg,#0d6efd,#0a58ca);
+  color:white;
+  padding:16px;
+  text-align:center;
+  font-weight:600;
+  font-size:18px;
+  letter-spacing:1px;
+  box-shadow:0 4px 10px rgba(0,0,0,0.2);
+  position:sticky;
+  top:0;
+  z-index:1000;
+}
+
+/* CONTAINER */
+.container{
+  display:flex;
+  height:calc(100vh - 70px); /* 🔥 fix tinggi setelah header */
+}
+
+/* SIDEBAR */
+.sidebar{
+  width:340px;
+  padding:15px;
+  overflow-y:auto;
+
+  background:rgba(255,255,255,0.9);
+  backdrop-filter:blur(10px);
+
+  box-shadow:0 10px 30px rgba(0,0,0,0.15);
+  border-right:1px solid rgba(255,255,255,0.3);
+}
+
+/* MAP (🔥 BAGIAN PALING PENTING) */
+#map{
+  flex:1;
+  height:100%;
+  width:100%;
+
+  /* 🔥 WAJIB biar bisa drag di HP */
+  touch-action: pan-x pan-y;
+
+  /* biar ga ke-block element lain */
+  z-index:1;
+}
+
+/* INPUT */
+input, select{
+  width:100%;
+  padding:10px;
+  margin:6px 0;
+  border-radius:10px;
+  border:1px solid #ddd;
+  transition:0.2s;
+  font-size:14px;
+}
+
+input:focus, select:focus{
+  outline:none;
+  border:1px solid #0d6efd;
+  box-shadow:0 0 6px rgba(13,110,253,0.3);
+}
+
+input::placeholder{
+  color:#aaa;
+  font-size:13px;
+}
+
+/* BUTTON */
+button{
+  width:100%;
+  padding:12px;
+  margin-top:8px;
+  border:none;
+  border-radius:12px;
+  background:linear-gradient(135deg,#0d6efd,#0a58ca);
+  color:white;
+  font-weight:600;
+  cursor:pointer;
+  transition:0.2s;
+}
+
+button:hover{
+  transform:translateY(-2px);
+  box-shadow:0 10px 20px rgba(13,110,253,0.3);
+}
+
+/* CARD */
+.card{
+  background:linear-gradient(145deg,#ffffff,#f3f6fb);
+  padding:15px;
+  border-radius:16px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.08);
+  margin-bottom:12px;
+}
+
+.card:hover{
+  transform:translateY(-2px);
+}
+
+/* LABEL */
+.label{
+  font-size:12px;
+  font-weight:600;
+  color:#666;
+  margin-bottom:4px;
+}
+
+/* FOTO */
+#preview{
+  width:100%;
+  border-radius:12px;
+  margin-top:8px;
+  border:1px solid #ddd;
+  display:none;
+}
+
+/* KOORDINAT */
+#koordinat{
+  background:#eef4ff;
+  padding:10px;
+  border-radius:10px;
+  font-size:13px;
+  text-align:center;
+  margin-top:8px;
+  font-weight:500;
+}
+
+/* SEARCH */
+#hasilCari{
+  max-height:150px;
+  overflow-y:auto;
+  background:white;
+  border-radius:10px;
+  margin-bottom:10px;
+}
+
+.item-hasil{
+  padding:10px;
+  cursor:pointer;
+  border-bottom:1px solid #eee;
+  border-radius:8px;
+  transition:0.2s;
+}
+
+.item-hasil:hover{
+  background:#e9f1ff;
+  transform:translateX(4px);
+}
+
+/* RESPONSIVE HP */
+@media(max-width:768px){
+
+  .container{
+    flex-direction:column;
+    height:calc(100vh - 70px);
+  }
+
+  .sidebar{
+    width:100%;
+    height:45%;
+  }
+
+  #map{
+    height:55%;
+  }
+
+}
+
+/* ANIMASI GLOBAL */
+*{
+  transition:all 0.2s ease;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="header">⚡ Tikor PLN </div>
+<div id="modeLabel" style="text-align:center;font-size:13px;color:#666;margin-top:4px;">
+Mode: BONGKAR
+</div>
+
+<div class="container">
+
+<div class="sidebar">
+
+<select id="mode">
+  <option value="BONGKAR">🔧 Mode Bongkar</option>
+  <option value="PASANG">⚡ Mode Pasang</option>
+</select>
+
+<input id="search" placeholder="🔍 Cari pelanggan...">
+<div id="hasilCari"></div>
+
+<!-- FORM KHUSUS BONGKAR -->
+<div id="formBongkar">
+
+<div class="card">
+
+<div class="label">Nama Pelanggan</div>
+<input id="nama" placeholder="Masukkan nama">
+
+<div class="label">ID Pelanggan</div>
+<input id="idpel" placeholder="Contoh: 123456">
+
+<div class="label">Alamat</div>
+<input id="alamat" placeholder="Alamat lengkap">
+
+</div>
+
+<div class="card">
+
+<div class="label">Upload Foto</div>
+<input type="file" id="foto" accept="image/*" capture="environment">
+
+<img id="preview">
+
+</div>
+
+<div class="card">
+
+<button onclick="ambilLokasi()">📡 Ambil GPS</button>
+
+<p id="koordinat">Koordinat: -</p>
+
+</div>
+
+<button onclick="simpanData()">💾 Simpan Data</button>
+
+</div>
+
+<!-- KHUSUS PASANG -->
+<div id="fiturPasang" class="hide">
+<button onclick="cekLokasi()">📍 Cek Lokasi</button>
+</div>
+
+</div>
+
+<div id="map"></div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script type="module">
+
+const PIN = "11026";
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBuk...",
+  authDomain: "tikor-pln-f5bf0.firebaseapp.com",
+  projectId: "tikor-pln-f5bf0"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbwaCiUaJPHPh9blJAx1DG81w8nV2db6YUI580FnC8DMe-qwq6ZgB_z4C3gZqPGUaZLTbQ/exec";
+
+let currentLat=null, currentLng=null;
+let markersLayer=L.layerGroup();
+let allData=[];
+
+const map = L.map('map', {
+  maxZoom: 22,
+  dragging: true,
+  touchZoom: true,
+  scrollWheelZoom: true,
+  doubleClickZoom: true
+}).setView([-6.4,107.4],18);
+
+// 🔥 TAMBAHKAN DI SINI
+map.dragging.enable();
+map.touchZoom.enable();
+map.scrollWheelZoom.enable();
+
+L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:22}).addTo(map);
+markersLayer.addTo(map);
+autoLokasiAwal();
+// 🔥 LOAD DATA DARI FIREBASE (BIAR MARKER TIDAK HILANG SAAT REFRESH)
+onSnapshot(collection(db, "tikor"), (snapshot) => {
+
+  markersLayer.clearLayers(); // hapus marker lama
+  allData = []; // reset array
+
+  snapshot.forEach(docSnap => {
+    let d = docSnap.data();
+    d.id = docSnap.id;
+
+    allData.push(d);
+
+    // icon merah tanda seru
+    let iconMerah = L.icon({
+      iconUrl: "https://cdn-icons-png.flaticon.com/512/564/564619.png",
+      iconSize: [35,35]
+    });
+
+    let marker = L.marker([d.lat, d.lng], { icon: iconMerah })
+      .addTo(markersLayer);
+
+    marker.bindPopup(`
+      <b>${d.nama}</b><br>
+      ${d.idpel}<br>
+      ${d.alamat}<br><br>
+      <button onclick="hapus('${d.id}')">🗑️ Hapus</button>
+    `);
+  });
+
+});
+// AUTO LOKASI SAAT LOAD
+function autoLokasiAwal(){
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(pos=>{
+      currentLat = pos.coords.latitude;
+      currentLng = pos.coords.longitude;
+
+      map.flyTo([currentLat, currentLng], 20);
+
+      L.marker([currentLat, currentLng],{
+  icon: L.icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/190/190411.png',
+    iconSize: [30,30]
+  })
+}).addTo(map)
+.bindPopup("👤 Lokasi Anda")
+.openPopup();
+
+    }, ()=>{
+      alert("Gagal ambil lokasi, aktifkan GPS");
+    });
+  }
+}
+
+/* MODE SWITCH */
+const modeEl = document.getElementById("mode");
+const formBongkar = document.getElementById("formBongkar");
+const fiturPasang = document.getElementById("fiturPasang");
+
+modeEl.addEventListener("change",()=>{
+
+if(modeEl.value==="PASANG"){
+
+  // SEMBUNYIKAN FORM INPUT
+  formBongkar.style.display = "none";
+
+  // TAMPILKAN FITUR PASANG
+  fiturPasang.style.display = "block";
+
+}else{
+
+  // TAMPILKAN FORM INPUT
+  formBongkar.style.display = "block";
+
+  // SEMBUNYIKAN FITUR PASANG
+  fiturPasang.style.display = "none";
+
+}
+
+});
+
+/* GPS */
+window.ambilLokasi = function(){
+navigator.geolocation.getCurrentPosition(pos=>{
+currentLat=pos.coords.latitude;
+currentLng=pos.coords.longitude;
+
+document.getElementById("koordinat").innerText =
+`📍 ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)}`;
+
+map.setView([currentLat,currentLng],21);
+});
+}
+
+/* JARAK */
+function jarakMeter(lat1, lon1, lat2, lon2){
+let R=6371000;
+let dLat=(lat2-lat1)*Math.PI/180;
+let dLon=(lon2-lon1)*Math.PI/180;
+
+let a=Math.sin(dLat/2)**2+
+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+Math.sin(dLon/2)**2;
+
+return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+/* CEK */
+window.cekLokasi = function(){
+navigator.geolocation.getCurrentPosition(pos=>{
+let lat=pos.coords.latitude;
+let lng=pos.coords.longitude;
+
+let dekat=false;
+
+allData.forEach(d=>{
+let j=jarakMeter(lat,lng,d.lat,d.lng);
+if(j<20) dekat=true;
+});
+
+if(dekat){
+alert("⚠️ ADA TITIK BONGKAR!");
+}else{
+alert("✅ AMAN");
+}
+});
+}
+
+
+/* SIMPAN */
+window.simpanData = async function(){
+
+  if(document.getElementById("mode").value === "PASANG"){
+    alert("❌ Mode Pasang tidak boleh input data!");
+    return;
+  }
+
+  // ambil data dari input
+  let nama = document.getElementById("nama").value;
+  let idpel = document.getElementById("idpel").value;
+  let alamat = document.getElementById("alamat").value;
+
+  // validasi
+  if(!nama || !idpel || !alamat || !currentLat){
+    alert("❌ Lengkapi data & ambil GPS dulu!");
+    return;
+  }
+
+  // ambil foto dari preview
+  let fotoBase64 = document.getElementById("preview").src || "";
+
+  // buat object data
+  let data = {
+    nama,
+    idpel,
+    alamat,
+    lat: currentLat,
+    lng: currentLng,
+    waktu: new Date().toISOString()
+  };
+
+  // kirim ke Google Sheet
+  fetch(SHEET_URL,{
+    method:"POST",
+    mode:"no-cors",
+    body:JSON.stringify({...data, foto: fotoBase64})
+  });
+
+  // simpan ke Firebase
+  await addDoc(collection(db,"tikor"), data);
+
+ 
+
+  // tambahkan ke array allData biar bisa dicari
+  allData.push(data);
+
+  alert("✅ Data berhasil disimpan");
+
+  // reset form
+  document.getElementById("nama").value="";
+  document.getElementById("idpel").value="";
+  document.getElementById("alamat").value="";
+  document.getElementById("preview").src="";
+  document.getElementById("preview").style.display="none";
+}
+window.selesai=async function(id){
+let pin=prompt("PIN:");
+if(pin!==PIN)return alert("Salah");
+await updateDoc(doc(db,"tikor",id),{status:"SELESAI"});
+}
+
+/* DELETE */
+window.hapus=async function(id){
+let pin=prompt("PIN:");
+if(pin!==PIN)return alert("Salah");
+await deleteDoc(doc(db,"tikor",id));
+}
+const searchInput = document.getElementById("search");
+const hasilCari = document.getElementById("hasilCari");
+
+/* RENDER HASIL */
+function renderHasil(keyword){
+  hasilCari.innerHTML = "";
+
+  if(!keyword) return;
+
+  let hasil = allData.filter(d =>
+    d.nama.toLowerCase().includes(keyword) ||
+    d.idpel.includes(keyword)
+  );
+
+  // 🔴 JIKA TIDAK ADA DATA
+  if(hasil.length === 0){
+    let div = document.createElement("div");
+    div.className = "item-hasil";
+    div.style.color = "red";
+    div.style.textAlign = "center";
+    div.innerText = "❌ Pelanggan tidak ditemukan";
+
+    hasilCari.appendChild(div);
+    return;
+  }
+
+  // ✅ JIKA ADA DATA
+  hasil.slice(0,10).forEach(d=>{
+    let div = document.createElement("div");
+    div.className = "item-hasil";
+    div.innerText = d.nama + " ("+d.idpel+")";
+
+    div.onclick = ()=>{
+      fokusKeLokasi(d);
+    };
+
+    hasilCari.appendChild(div);
+  });
+}
+
+/* FOKUS KE MAP */
+function fokusKeLokasi(d){
+  map.setView([d.lat, d.lng],21);
+
+}
+
+/* SEARCH */
+searchInput.addEventListener("input", ()=>{
+  let keyword = searchInput.value.toLowerCase();
+  renderHasil(keyword);
+});
+
+/* ENTER */
+searchInput.addEventListener("keypress", (e)=>{
+  if(e.key === "Enter"){
+
+    let keyword = searchInput.value.toLowerCase();
+
+    if(!keyword) return;
+
+    // 🔥 PRIORITAS 1: CARI IDPEL (PALING AKURAT)
+    let byId = allData.find(d => d.idpel === keyword);
+    if(byId){
+      fokusKeLokasi(byId);
+      return;
+    }
+
+    // 🔥 PRIORITAS 2: EXACT NAMA
+    let exactNama = allData.find(d => d.nama.toLowerCase() === keyword);
+    if(exactNama){
+      fokusKeLokasi(exactNama);
+      return;
+    }
+
+    // 🔥 PRIORITAS 3: MENGANDUNG KATA
+    let hasil = allData.filter(d =>
+      d.nama.toLowerCase().includes(keyword)
+    );
+
+    if(hasil.length === 1){
+      fokusKeLokasi(hasil[0]);
+    } 
+    else if(hasil.length > 1){
+
+      // 🔥 SORT BIAR YANG PALING MIRIP DI ATAS
+      hasil.sort((a,b)=>{
+        return a.nama.length - b.nama.length;
+      });
+
+      // fokus ke yang paling relevan
+      fokusKeLokasi(hasil[0]);
+
+      // tampilkan semua marker juga
+      tampilkanSemuaMarker(hasil);
+    }
+    else{
+      alert("❌ Data tidak ditemukan");
+    }
+  }
+});
+function tampilkanSemuaMarker(dataList){
+  markersLayer.clearLayers();
+
+  let bounds = [];
+
+  dataList.forEach(d=>{
+    let marker = L.marker([d.lat,d.lng]).addTo(markersLayer);
+
+    marker.bindPopup(`
+      <b>${d.nama}</b><br>
+      ${d.idpel}<br>
+      ${d.alamat}
+    `);
+
+    bounds.push([d.lat,d.lng]);
+  });
+
+  if(bounds.length > 0){
+    map.fitBounds(bounds);
+  }
+}
+
+document.getElementById("foto").addEventListener("change", function(e){
+  let file = e.target.files[0];
+  if(file){
+    let reader = new FileReader();
+    reader.onload = function(ev){
+      let preview = document.getElementById("preview");
+      preview.src = ev.target.result;
+      preview.style.display = "block";
+    }
+    reader.readAsDataURL(file);
+  }
+});
+</script>
+
+</body>
+</html>
